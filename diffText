@@ -1,0 +1,615 @@
+Binary files adet/_C.cpython-38-x86_64-linux-gnu.so and ../AdelaiDet/adet/_C.cpython-38-x86_64-linux-gnu.so differ
+Only in adet/checkpoint: __pycache__
+diff -bur adet/config/defaults.py ../AdelaiDet/adet/config/defaults.py
+--- adet/config/defaults.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/config/defaults.py	2023-03-19 10:55:38.000000000 +0530
+@@ -10,6 +10,7 @@
+ _C.MODEL.RESNETS.DEFORM_INTERVAL = 1
+ _C.INPUT.HFLIP_TRAIN = True
+ _C.INPUT.CROP.CROP_INSTANCE = True
++_C.INPUT.IS_ROTATE = False
+ 
+ # ---------------------------------------------------------------------------- #
+ # FCOS Head
+@@ -107,6 +108,7 @@
+ _C.MODEL.BATEXT.CANONICAL_SIZE = 96  # largest min_size for level 3 (stride=8)
+ _C.MODEL.BATEXT.USE_COORDCONV = False
+ _C.MODEL.BATEXT.USE_AET = False
++_C.MODEL.BATEXT.EVAL_TYPE = 3 # 1: G; 2: W; 3: S
+ _C.MODEL.BATEXT.CUSTOM_DICT = "" # Path to the class file.
+ 
+ # ---------------------------------------------------------------------------- #
+@@ -335,48 +337,28 @@
+ 
+ 
+ # ---------------------------------------------------------------------------- #
+-# (Deformable) Transformer Options
++# FCPose Options
+ # ---------------------------------------------------------------------------- #
+-_C.MODEL.TRANSFORMER = CN()
+-_C.MODEL.TRANSFORMER.USE_POLYGON = False
+-_C.MODEL.TRANSFORMER.ENABLED = False
+-_C.MODEL.TRANSFORMER.INFERENCE_TH_TEST = 0.45
+-_C.MODEL.TRANSFORMER.VOC_SIZE = 96
+-_C.MODEL.TRANSFORMER.NUM_CHARS = 25
+-_C.MODEL.TRANSFORMER.AUX_LOSS = True
+-_C.MODEL.TRANSFORMER.ENC_LAYERS = 6
+-_C.MODEL.TRANSFORMER.DEC_LAYERS = 6
+-_C.MODEL.TRANSFORMER.DIM_FEEDFORWARD = 1024
+-_C.MODEL.TRANSFORMER.HIDDEN_DIM = 256
+-_C.MODEL.TRANSFORMER.DROPOUT = 0.1
+-_C.MODEL.TRANSFORMER.NHEADS = 8
+-_C.MODEL.TRANSFORMER.NUM_QUERIES = 100
+-_C.MODEL.TRANSFORMER.ENC_N_POINTS = 4
+-_C.MODEL.TRANSFORMER.DEC_N_POINTS = 4
+-_C.MODEL.TRANSFORMER.POSITION_EMBEDDING_SCALE = 6.283185307179586  # 2 PI
+-_C.MODEL.TRANSFORMER.NUM_FEATURE_LEVELS = 4
+-_C.MODEL.TRANSFORMER.NUM_CTRL_POINTS = 8
+-
+-_C.MODEL.TRANSFORMER.LOSS = CN()
+-_C.MODEL.TRANSFORMER.LOSS.AUX_LOSS = True
+-_C.MODEL.TRANSFORMER.LOSS.POINT_CLASS_WEIGHT = 2.0
+-_C.MODEL.TRANSFORMER.LOSS.POINT_COORD_WEIGHT = 5.0
+-_C.MODEL.TRANSFORMER.LOSS.POINT_TEXT_WEIGHT = 2.0
+-_C.MODEL.TRANSFORMER.LOSS.BOX_CLASS_WEIGHT = 2.0
+-_C.MODEL.TRANSFORMER.LOSS.BOX_COORD_WEIGHT = 5.0
+-_C.MODEL.TRANSFORMER.LOSS.BOX_GIOU_WEIGHT = 2.0
+-_C.MODEL.TRANSFORMER.LOSS.FOCAL_ALPHA = 0.25
+-_C.MODEL.TRANSFORMER.LOSS.FOCAL_GAMMA = 2.0
+-
+-
+-_C.SOLVER.OPTIMIZER = "ADAMW"
+-_C.SOLVER.LR_BACKBONE = 1e-5
+-_C.SOLVER.LR_BACKBONE_NAMES = []
+-_C.SOLVER.LR_LINEAR_PROJ_NAMES = []
+-_C.SOLVER.LR_LINEAR_PROJ_MULT = 0.1
+-
+-_C.TEST.USE_LEXICON = False
+-# 1 - Generic, 2 - Weak, 3 - Strong (for icdar2015)
+-# 1 - Full lexicon (for totaltext/ctw1500)
+-_C.TEST.LEXICON_TYPE = 1
+-_C.TEST.WEIGHTED_EDIT_DIST = False
++_C.MODEL.FCPOSE = CN()
++_C.MODEL.FCPOSE_ON = False
++_C.MODEL.FCPOSE.ATTN_LEN = 2737
++_C.MODEL.FCPOSE.DYNAMIC_CHANNELS = 32
++_C.MODEL.FCPOSE.MAX_PROPOSALS = 70
++_C.MODEL.FCPOSE.PROPOSALS_PER_INST = 70
++_C.MODEL.FCPOSE.LOSS_WEIGHT_KEYPOINT = 2.5
++_C.MODEL.FCPOSE.FOCAL_LOSS_ALPHA = 0.25
++_C.MODEL.FCPOSE.FOCAL_LOSS_GAMMA = 2.0
++_C.MODEL.FCPOSE.GT_HEATMAP_STRIDE = 2
++_C.MODEL.FCPOSE.SIGMA = 1
++_C.MODEL.FCPOSE.HEATMAP_SIGMA = 1.8
++_C.MODEL.FCPOSE.HEAD_HEATMAP_SIGMA = 0.01
++_C.MODEL.FCPOSE.DISTANCE_NORM = 12.0
++_C.MODEL.FCPOSE.LOSS_WEIGHT_DIRECTION = 9.0
++
++_C.MODEL.FCPOSE.BASIS_MODULE = CN()
++_C.MODEL.FCPOSE.BASIS_MODULE.NUM_BASES = 32
++_C.MODEL.FCPOSE.BASIS_MODULE.CONVS_DIM = 128
++_C.MODEL.FCPOSE.BASIS_MODULE.COMMON_STRIDE = 8
++_C.MODEL.FCPOSE.BASIS_MODULE.NUM_CLASSES = 17
++_C.MODEL.FCPOSE.BASIS_MODULE.LOSS_WEIGHT = 0.2
++_C.MODEL.FCPOSE.BASIS_MODULE.BN_TYPE = "SyncBN"
+\ No newline at end of file
+Only in adet/config: __pycache__
+diff -bur adet/data/augmentation.py ../AdelaiDet/adet/data/augmentation.py
+--- adet/data/augmentation.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/augmentation.py	2023-03-19 10:55:38.000000000 +0530
+@@ -19,6 +19,8 @@
+             dataset format.
+     """
+     bbox = random.choice(instances)
++    bbox[::2] = np.clip(bbox[::2], 0, image_size[1])
++    bbox[1::2] = np.clip(bbox[1::2], 0, image_size[0])
+     crop_size = np.asarray(crop_size, dtype=np.int32)
+     center_yx = (bbox[1] + bbox[3]) * 0.5, (bbox[0] + bbox[2]) * 0.5
+     assert (
+diff -bur adet/data/builtin.py ../AdelaiDet/adet/data/builtin.py
+--- adet/data/builtin.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/builtin.py	2023-03-22 18:07:07.000000000 +0530
+@@ -17,7 +17,6 @@
+ }
+ 
+ _PREDEFINED_SPLITS_TEXT = {
+-    # datasets with bezier annotations
+     "totaltext_train": ("totaltext/train_images", "totaltext/train.json"),
+     "totaltext_val": ("totaltext/test_images", "totaltext/test.json"),
+     "ctw1500_word_train": ("CTW1500/ctwtrain_text_image", "CTW1500/annotations/train_ctw1500_maxlen100_v2.json"),
+@@ -31,19 +30,9 @@
+     "art_train": ("ArT/rename_artimg_train", "ArT/annotations/abcnet_art_train.json"), 
+     "lsvt_train": ("LSVT/rename_lsvtimg_train", "LSVT/annotations/abcnet_lsvt_train.json"), 
+     "chnsyn_train": ("ChnSyn/syn_130k_images", "ChnSyn/annotations/chn_syntext.json"),
+-    # datasets with polygon annotations
+-    "totaltext_poly_train": ("totaltext/train_images", "totaltext/train_poly.json"),
+-    "totaltext_poly_val": ("totaltext/test_images", "totaltext/test_poly.json"),
+-    "ctw1500_word_poly_train": ("CTW1500/ctwtrain_text_image", "CTW1500/annotations/train_poly.json"),
+-    "ctw1500_word_poly_test": ("CTW1500/ctwtest_text_image","CTW1500/annotations/test_poly.json"),
+-    "syntext1_poly_train": ("syntext1/images", "syntext1/annotations/train_poly.json"),
+-    "syntext2_poly_train": ("syntext2/images", "syntext2/annotations/train_poly.json"),
+-    "mltbezier_word_poly_train": ("mlt2017/images","mlt2017/annotations/train_poly.json"),
+-    "icdar2015_train": ("icdar2015/train_images", "icdar2015/train_poly.json"),
+-    "icdar2015_test": ("icdar2015/test_images", "icdar2015/test_poly.json"),
+-    "icdar2019_train": ("icdar2019/train_images", "icdar2019/train_poly.json"),
+-    "textocr_train": ("textocr/train_images", "textocr/annotations/train_poly.json"),
+-    "textocr_val": ("textocr/train_images", "textocr/annotations/val_poly.json"),
++    "icdar2013_train": ("icdar2013/train_images", "icdar2013/ic13_train.json"),
++    "icdar2015_train": ("icdar2015/train_images", "icdar2015/ic15_train.json"),
++    "icdar2015_test": ("icdar2015/test_images", "icdar2015/ic15_test.json"),
+ }
+ 
+ metadata_text = {
+diff -bur adet/data/dataset_mapper.py ../AdelaiDet/adet/data/dataset_mapper.py
+--- adet/data/dataset_mapper.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/dataset_mapper.py	2023-03-19 10:55:38.000000000 +0530
+@@ -62,6 +62,7 @@
+             "Rebuilding the augmentations. The previous augmentations will be overridden."
+         )
+         self.augmentation = build_augmentation(cfg, is_train)
++        self.cfg = cfg
+ 
+         if cfg.INPUT.CROP.ENABLED and is_train:
+             self.augmentation.insert(
+@@ -75,6 +76,14 @@
+             logging.getLogger(__name__).info(
+                 "Cropping used in training: " + str(self.augmentation[0])
+             )
++            if cfg.INPUT.IS_ROTATE:
++                self.augmentation.insert(
++                    1,
++                    T.RandomRotation(angle=[-30,30],sample_style="range")
++                )
++                logging.getLogger(__name__).info(
++                    "Rotation used in training: " + str(self.augmentation[1])
++                )
+ 
+         self.basis_loss_on = cfg.MODEL.BASIS_MODULE.LOSS_ON
+         self.ann_set = cfg.MODEL.BASIS_MODULE.ANN_SET
+@@ -92,6 +101,15 @@
+         Returns:
+             dict: a format that builtin models in detectron2 accept
+         """
++        if self.cfg.INPUT.IS_ROTATE:
++            augmentation = self.augmentation[2:]
++            pp = np.random.rand()
++            if pp < 0.5:
++                augmentation = [self.augmentation[0]] + augmentation
++            pp1 = np.random.rand()
++            if pp1 < 0.5:
++                augmentation = [self.augmentation[1]] + augmentation
++
+         dataset_dict = copy.deepcopy(dataset_dict)  # it will be modified by code below
+         # USER: Write your own image loading if it's not from a file
+         try:
+@@ -112,7 +130,9 @@
+                 image = image.transpose(1, 0, 2)
+             else:
+                 raise e
+-
++        if image.shape[1]==0 or image.shape[0]==0:
++            print(dataset_dict)
++            raise e
+         # USER: Remove if you don't do semantic/panoptic segmentation.
+         if "sem_seg_file_name" in dataset_dict:
+             sem_seg_gt = utils.read_image(
+@@ -134,6 +154,9 @@
+         image, sem_seg_gt = aug_input.image, aug_input.sem_seg
+ 
+         image_shape = image.shape[:2]  # h, w
++        if image.shape[1]==0 or image.shape[0]==0:
++            print(dataset_dict)
++            raise e
+         # Pytorch's dataloader is efficient on torch.Tensor due to shared-memory,
+         # but not efficient on large generic data structures due to the use of pickle & mp.Queue.
+         # Therefore it's important to use torch.Tensor.
+Only in adet/data/datasets: __pycache__
+diff -bur adet/data/datasets/text.py ../AdelaiDet/adet/data/datasets/text.py
+--- adet/data/datasets/text.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/datasets/text.py	2023-03-19 10:55:38.000000000 +0530
+@@ -182,10 +182,6 @@
+             if bezierpts:  # list[float]
+                 obj["beziers"] = bezierpts
+ 
+-            polypts = anno.get("polys", None)
+-            if polypts:
+-                obj["polygons"] = polypts
+-
+             text = anno.get("rec", None)
+             if text:
+                 obj["text"] = text
+diff -bur adet/data/detection_utils.py ../AdelaiDet/adet/data/detection_utils.py
+--- adet/data/detection_utils.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/detection_utils.py	2023-03-19 10:55:38.000000000 +0530
+@@ -9,6 +9,7 @@
+ from detectron2.data.detection_utils import \
+     transform_instance_annotations as d2_transform_inst_anno
+ 
++import math
+ 
+ def transform_instance_annotations(
+     annotation, transforms, image_size, *, keypoint_hflip_indices=None
+@@ -22,17 +23,12 @@
+     )
+ 
+     if "beziers" in annotation:
+-        beziers = transform_ctrl_pnts_annotations(annotation["beziers"], transforms)
++        beziers = transform_beziers_annotations(annotation["beziers"], transforms)
+         annotation["beziers"] = beziers
+-
+-    if "polygons" in annotation:
+-        polys = transform_ctrl_pnts_annotations(annotation["polygons"], transforms)
+-        annotation["polygons"] = polys
+-
+     return annotation
+ 
+ 
+-def transform_ctrl_pnts_annotations(pnts, transforms):
++def transform_beziers_annotations(beziers, transforms):
+     """
+     Transform keypoint annotations of an image.
+ 
+@@ -41,8 +37,8 @@
+         transforms (TransformList):
+     """
+     # (N*2,) -> (N, 2)
+-    pnts = np.asarray(pnts, dtype="float64").reshape(-1, 2)
+-    pnts = transforms.apply_coords(pnts).reshape(-1)
++    beziers = np.asarray(beziers, dtype="float64").reshape(-1, 2)
++    beziers = transforms.apply_coords(beziers).reshape(-1)
+ 
+     # This assumes that HorizFlipTransform is the only one that does flip
+     do_hflip = (
+@@ -51,7 +47,7 @@
+     if do_hflip:
+         raise ValueError("Flipping text data is not supported (also disencouraged).")
+ 
+-    return pnts
++    return beziers
+ 
+ 
+ def annotations_to_instances(annos, image_size, mask_format="polygon"):
+@@ -69,10 +65,6 @@
+         text = [obj.get("rec", []) for obj in annos]
+         instance.text = torch.as_tensor(text, dtype=torch.int32)
+ 
+-    if "polygons" in annos[0]:
+-        polys = [obj.get("polygons", []) for obj in annos]
+-        instance.polygons = torch.as_tensor(polys, dtype=torch.float32)
+-
+     return instance
+ 
+ 
+@@ -111,3 +103,117 @@
+ """
+ Alias for backward-compatibility.
+ """
++
++
++
++class HeatmapGenerator():
++    def __init__(self, num_joints, sigma, head_sigma):
++        self.num_joints = num_joints
++        self.sigma = sigma
++        self.head_sigma = head_sigma
++
++        self.p3_sigma = sigma / 2
++
++        size = 2*np.round(3 * sigma) + 3
++        x = np.arange(0, size, 1, float)
++        y = x[:, np.newaxis]
++        x0, y0 = (size - 1) /2, (size - 1) /2
++        self.g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
++
++        size = 2*np.round(3 * self.p3_sigma) + 3
++        x = np.arange(0, size, 1, float)
++        y = x[:, np.newaxis]
++        x0, y0 = (size - 1) /2, (size - 1) /2
++        self.p3_g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * self.p3_sigma ** 2))
++
++        size = 2*np.round(3 * head_sigma) + 3
++        x = np.arange(0, size, 1, float)
++        y = x[:, np.newaxis]
++        x0, y0 = (size - 1) /2, (size - 1) /2
++        self.head_g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * head_sigma ** 2))
++
++    def __call__(self, gt_instance, gt_heatmap_stride):
++        heatmap_size = gt_instance.image_size
++        heatmap_size = [math.ceil(heatmap_size[0]/ 32)*(32/gt_heatmap_stride),
++                    math.ceil(heatmap_size[1]/ 32)*(32/gt_heatmap_stride)]
++
++        h,w = heatmap_size
++        h,w = int(h),int(w) 
++        joints = gt_instance.gt_keypoints.tensor.numpy().copy()
++        joints[:,:,[0,1]] = joints[:,:,[0,1]] / gt_heatmap_stride
++        sigma = self.sigma
++        head_sigma = self.head_sigma
++        p3_sigma = self.p3_sigma
++
++        output_list = []
++        head_output_list = []
++        for p in joints:
++            hms = np.zeros((self.num_joints, h, w),dtype=np.float32)
++            head_hms = np.zeros((self.num_joints, h, w),dtype=np.float32)
++            for idx, pt in enumerate(p):
++                if pt[2] > 0:
++                    x, y = int(pt[0]), int(pt[1])
++                    if x < 0 or y < 0 or \
++                       x >= w or y >= h:
++                        continue
++
++                    ul = int(np.round(x - 3 * sigma - 1)), int(np.round(y - 3 * sigma - 1))
++                    br = int(np.round(x + 3 * sigma + 2)), int(np.round(y + 3 * sigma + 2))
++
++                    c, d = max(0, -ul[0]), min(br[0], w) - ul[0]
++                    a, b = max(0, -ul[1]), min(br[1], h) - ul[1]
++
++                    cc, dd = max(0, ul[0]), min(br[0], w)
++                    aa, bb = max(0, ul[1]), min(br[1], h)
++                    hms[idx, aa:bb, cc:dd] = np.maximum(
++                        hms[idx, aa:bb, cc:dd], self.g[a:b, c:d])
++
++                    ul = int(np.round(x - 3 * head_sigma - 1)), int(np.round(y - 3 * head_sigma - 1))
++                    br = int(np.round(x + 3 * head_sigma + 2)), int(np.round(y + 3 * head_sigma + 2))
++
++                    c, d = max(0, -ul[0]), min(br[0], w) - ul[0]
++                    a, b = max(0, -ul[1]), min(br[1], h) - ul[1]
++
++                    cc, dd = max(0, ul[0]), min(br[0], w)
++                    aa, bb = max(0, ul[1]), min(br[1], h)
++                    head_hms[idx, aa:bb, cc:dd] = np.maximum(
++                        head_hms[idx, aa:bb, cc:dd], self.head_g[a:b, c:d])
++                    
++            hms = torch.from_numpy(hms)
++            head_hms = torch.from_numpy(head_hms)
++            output_list.append(hms)
++            head_output_list.append(head_hms)
++
++        h,w = h//4, w//4
++        p3_output_list = []
++        joints = gt_instance.gt_keypoints.tensor.numpy().copy()
++        joints[:,:,[0,1]] = joints[:,:,[0,1]] / 8
++        for p in joints:
++            p3_hms = np.zeros((self.num_joints, h, w),dtype=np.float32)
++            for idx, pt in enumerate(p):
++                if pt[2] > 0:
++                    x, y = int(pt[0]), int(pt[1])
++                    if x < 0 or y < 0 or \
++                       x >= w or y >= h:
++                        continue
++
++                    ul = int(np.round(x - 3 * p3_sigma - 1)), int(np.round(y - 3 * p3_sigma - 1))
++                    br = int(np.round(x + 3 * p3_sigma + 2)), int(np.round(y + 3 * p3_sigma + 2))
++
++                    c, d = max(0, -ul[0]), min(br[0], w) - ul[0]
++                    a, b = max(0, -ul[1]), min(br[1], h) - ul[1]
++
++                    cc, dd = max(0, ul[0]), min(br[0], w)
++                    aa, bb = max(0, ul[1]), min(br[1], h)
++                    p3_hms[idx, aa:bb, cc:dd] = np.maximum(
++                        p3_hms[idx, aa:bb, cc:dd], self.p3_g[a:b, c:d])
++                    
++            p3_hms = torch.from_numpy(p3_hms)
++            p3_output_list.append(p3_hms)
++        output_list = torch.stack(output_list,dim=0)
++        p3_output_list = torch.stack(p3_output_list,dim=0)
++        head_output_list = torch.stack(head_output_list,dim=0)
++        gt_instance.keypoint_heatmap = output_list
++        gt_instance.head_heatmap = head_output_list
++        gt_instance.p3_output_list = p3_output_list
++        return gt_instance
+\ No newline at end of file
+Only in ../AdelaiDet/adet/data: fcpose_dataset_mapper.py
+diff -bur adet/data/__init__.py ../AdelaiDet/adet/data/__init__.py
+--- adet/data/__init__.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/data/__init__.py	2023-03-19 10:55:38.000000000 +0530
+@@ -1,5 +1,6 @@
+ from . import builtin  # ensure the builtin datasets are registered
+ from .dataset_mapper import DatasetMapperWithBasis
++from .fcpose_dataset_mapper import FCPoseDatasetMapper
+ 
+ 
+ __all__ = ["DatasetMapperWithBasis"]
+Only in adet/data: __pycache__
+diff -bur adet/evaluation/__init__.py ../AdelaiDet/adet/evaluation/__init__.py
+--- adet/evaluation/__init__.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/evaluation/__init__.py	2023-03-19 10:55:38.000000000 +0530
+@@ -1,3 +1,5 @@
+-from .text_evaluation import TextEvaluator
++from .text_evaluation_all import TextEvaluator
+ from .text_eval_script import text_eval_main
++from .text_eval_script_ic15 import text_eval_main_ic15
+ from . import rrc_evaluation_funcs
+\ No newline at end of file
++from . import rrc_evaluation_funcs_ic15
+\ No newline at end of file
+Only in adet/evaluation: lexicon_procesor.py
+Only in adet/evaluation: __pycache__
+Only in ../AdelaiDet/adet/evaluation: rrc_evaluation_funcs_ic15.py
+diff -bur adet/evaluation/rrc_evaluation_funcs.py ../AdelaiDet/adet/evaluation/rrc_evaluation_funcs.py
+--- adet/evaluation/rrc_evaluation_funcs.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/evaluation/rrc_evaluation_funcs.py	2023-03-19 10:55:38.000000000 +0530
+@@ -450,13 +450,13 @@
+ 
+         outZip.close()
+ 
+-    if show_result:
+-        sys.stdout.write("Calculated!")
+-        sys.stdout.write('\n')
+-        sys.stdout.write(json.dumps(resDict['e2e_method']))
+-        sys.stdout.write('\n')
+-        sys.stdout.write(json.dumps(resDict['det_only_method']))
+-        sys.stdout.write('\n')
++    # if show_result:
++    #     sys.stdout.write("Calculated!")
++    #     sys.stdout.write('\n')
++    #     sys.stdout.write(json.dumps(resDict['e2e_method']))
++    #     sys.stdout.write('\n')
++    #     sys.stdout.write(json.dumps(resDict['det_only_method']))
++    #     sys.stdout.write('\n')
+     
+     return resDict
+ 
+Only in ../AdelaiDet/adet/evaluation: text_eval_script_ic15.py
+Only in ../AdelaiDet/adet/evaluation: text_evaluation_all.py
+Only in adet/evaluation: text_evaluation.py
+Only in ../AdelaiDet/adet/layers: bezier_align.py
+Only in ../AdelaiDet/adet/layers: conv_with_kaiming_uniform.py
+Only in ../AdelaiDet/adet/layers/csrc: BezierAlign
+Only in adet/layers/csrc: DeformAttn
+Only in ../AdelaiDet/adet/layers/csrc: DefROIAlign
+Only in ../AdelaiDet/adet/layers/csrc: ml_nms
+diff -bur adet/layers/csrc/vision.cpp ../AdelaiDet/adet/layers/csrc/vision.cpp
+--- adet/layers/csrc/vision.cpp	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/layers/csrc/vision.cpp	2023-03-19 10:55:38.000000000 +0530
+@@ -1,5 +1,8 @@
+ // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+-#include "DeformAttn/ms_deform_attn.h"
++
++#include "ml_nms/ml_nms.h"
++#include "DefROIAlign/DefROIAlign.h"
++#include "BezierAlign/BezierAlign.h"
+ 
+ namespace adet {
+ 
+@@ -50,8 +53,11 @@
+ }
+ 
+ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+-  m.def("ms_deform_attn_forward", &ms_deform_attn_forward, "ms_deform_attn_forward");
+-  m.def("ms_deform_attn_backward", &ms_deform_attn_backward, "ms_deform_attn_backward");
++  m.def("ml_nms", &ml_nms, "Multi-Label NMS");
++  m.def("def_roi_align_forward", &DefROIAlign_forward, "def_roi_align_forward");
++  m.def("def_roi_align_backward", &DefROIAlign_backward, "def_roi_align_backward");
++  m.def("bezier_align_forward", &BezierAlign_forward, "bezier_align_forward");
++  m.def("bezier_align_backward", &BezierAlign_backward, "bezier_align_backward");
+ }
+ 
+ } // namespace adet
+Only in adet/layers: deformable_transformer.py
+Only in ../AdelaiDet/adet/layers: deform_conv.py
+Only in ../AdelaiDet/adet/layers: def_roi_align.py
+Only in ../AdelaiDet/adet/layers: gcn.py
+diff -bur adet/layers/__init__.py ../AdelaiDet/adet/layers/__init__.py
+--- adet/layers/__init__.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/layers/__init__.py	2023-03-19 10:55:38.000000000 +0530
+@@ -1,3 +1,10 @@
+-from .ms_deform_attn import MSDeformAttn
++from .deform_conv import DFConv2d
++from .ml_nms import ml_nms
++from .iou_loss import IOULoss
++from .conv_with_kaiming_uniform import conv_with_kaiming_uniform
++from .bezier_align import BezierAlign
++from .def_roi_align import DefROIAlign
++from .naive_group_norm import NaiveGroupNorm
++from .gcn import GCN
+ 
+ __all__ = [k for k in globals().keys() if not k.startswith("_")]
+\ No newline at end of file
+Only in ../AdelaiDet/adet/layers: iou_loss.py
+Only in ../AdelaiDet/adet/layers: ml_nms.py
+Only in adet/layers: ms_deform_attn.py
+Only in ../AdelaiDet/adet/layers: naive_group_norm.py
+Only in adet/layers: pos_encoding.py
+Only in adet/layers: __pycache__
+Only in ../AdelaiDet/adet/modeling: backbone
+Only in ../AdelaiDet/adet/modeling: batext
+Only in ../AdelaiDet/adet/modeling: blendmask
+Only in ../AdelaiDet/adet/modeling: condinst
+Only in ../AdelaiDet/adet/modeling: fcos
+Only in ../AdelaiDet/adet/modeling: fcpose
+diff -bur adet/modeling/__init__.py ../AdelaiDet/adet/modeling/__init__.py
+--- adet/modeling/__init__.py	2023-03-19 10:53:52.000000000 +0530
++++ ../AdelaiDet/adet/modeling/__init__.py	2023-03-19 10:55:38.000000000 +0530
+@@ -1,5 +1,14 @@
+ # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
+-from .transformer_detector import TransformerDetector
++from .fcos import FCOS
++from .blendmask import BlendMask
++from .backbone import build_fcos_resnet_fpn_backbone
++from .one_stage_detector import OneStageDetector, OneStageRCNN
++from .roi_heads.text_head import TextHead
++from .batext import BAText
++from .MEInst import MEInst
++from .condinst import condinst
++from .solov2 import SOLOv2
++from .fcpose import FCPose
+ 
+ _EXCLUDE = {"torch", "ShapeSpec"}
+ __all__ = [k for k in globals().keys() if k not in _EXCLUDE and not k.startswith("_")]
+Only in ../AdelaiDet/adet/modeling: MEInst
+Only in ../AdelaiDet/adet/modeling: one_stage_detector.py
+Only in ../AdelaiDet/adet/modeling: poolers.py
+Only in adet/modeling: __pycache__
+Only in ../AdelaiDet/adet/modeling: roi_heads
+Only in ../AdelaiDet/adet/modeling: solov2
+Only in adet/modeling: testr
+Only in adet/modeling: transformer_detector.py
+Only in adet/: __pycache__
+Only in ../AdelaiDet/adet: structures
+Only in ../AdelaiDet/adet/utils: measures.py
+Only in adet/utils: misc.py
+Only in adet/utils: __pycache__
+diff -bur adet/utils/visualizer.py ../AdelaiDet/adet/utils/visualizer.py
+--- adet/utils/visualizer.py	2023-03-19 10:53:53.000000000 +0530
++++ ../AdelaiDet/adet/utils/visualizer.py	2023-03-19 10:55:38.000000000 +0530
+@@ -9,7 +9,6 @@
+         Visualizer.__init__(self, image, metadata, instance_mode=instance_mode)
+         self.voc_size = cfg.MODEL.BATEXT.VOC_SIZE
+         self.use_customer_dictionary = cfg.MODEL.BATEXT.CUSTOM_DICT
+-        self.use_polygon = cfg.MODEL.TRANSFORMER.USE_POLYGON
+         if not self.use_customer_dictionary:
+             self.CTLABELS = [' ','!','"','#','$','%','&','\'','(',')','*','+',',','-','.','/','0','1','2','3','4','5','6','7','8','9',':',';','<','=','>','?','@','A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','[','\\',']','^','_','`','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','{','|','}','~']
+         else:
+@@ -18,28 +17,22 @@
+         assert(int(self.voc_size - 1) == len(self.CTLABELS)), "voc_size is not matched dictionary size, got {} and {}.".format(int(self.voc_size - 1), len(self.CTLABELS))
+ 
+     def draw_instance_predictions(self, predictions):
+-        if self.use_polygon:
+-            ctrl_pnts = predictions.polygons.numpy()
+-        else:
+-            ctrl_pnts = predictions.beziers.numpy()
++        beziers = predictions.beziers.numpy()
+         scores = predictions.scores.tolist()
+         recs = predictions.recs
+ 
+-        self.overlay_instances(ctrl_pnts, recs, scores)
++        self.overlay_instances(beziers, recs, scores)
+ 
+         return self.output
+ 
+-    def _ctrl_pnt_to_poly(self, pnt):
+-        if self.use_polygon:
+-            points = pnt.reshape(-1, 2)
+-        else:
++    def _bezier_to_poly(self, bezier):
+             # bezier to polygon
+             u = np.linspace(0, 1, 20)
+-            pnt = pnt.reshape(2, 4, 2).transpose(0, 2, 1).reshape(4, 4)
+-            points = np.outer((1 - u) ** 3, pnt[:, 0]) \
+-                + np.outer(3 * u * ((1 - u) ** 2), pnt[:, 1]) \
+-                + np.outer(3 * (u ** 2) * (1 - u), pnt[:, 2]) \
+-                + np.outer(u ** 3, pnt[:, 3])
++        bezier = bezier.reshape(2, 4, 2).transpose(0, 2, 1).reshape(4, 4)
++        points = np.outer((1 - u) ** 3, bezier[:, 0]) \
++            + np.outer(3 * u * ((1 - u) ** 2), bezier[:, 1]) \
++            + np.outer(3 * (u ** 2) * (1 - u), bezier[:, 2]) \
++            + np.outer(u ** 3, bezier[:, 3])
+             points = np.concatenate((points[:, :2], points[:, 2:]), axis=0)
+ 
+         return points
+@@ -77,11 +70,11 @@
+                 last_char = False
+         return s
+ 
+-    def overlay_instances(self, ctrl_pnts, recs, scores, alpha=0.5):
++    def overlay_instances(self, beziers, recs, scores, alpha=0.5):
+         color = (0.1, 0.2, 0.5)
+ 
+-        for ctrl_pnt, rec, score in zip(ctrl_pnts, recs, scores):
+-            polygon = self._ctrl_pnt_to_poly(ctrl_pnt)
++        for bezier, rec, score in zip(beziers, recs, scores):
++            polygon = self._bezier_to_poly(bezier)
+             self.draw_polygon(polygon, color, alpha=alpha)
+ 
+             # draw text in the top left corner
